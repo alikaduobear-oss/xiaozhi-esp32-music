@@ -1,59 +1,39 @@
-name: Build ESP32-S3 Xiaozhi Music Firmware
-
+name: 小智ESP32S3音乐固件编译
 on:
   push:
-    branches: [ main ]
-  workflow_dispatch:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: # 支持手动点击触发构建
 
 jobs:
   build_firmware:
     runs-on: ubuntu-latest
-    container:
-      image: espressif/idf:v5.4   # ← 修改这里
     steps:
-      - name: 拉取源码 + 完整更新子模块
+      # 1. 拉取仓库全部代码
+      - name: 检出项目源码
         uses: actions/checkout@v4
         with:
-          submodules: recursive
           fetch-depth: 0
+          submodules: true # 拉取子组件，避免依赖缺失
 
-      - name: 校验关键文件
-        run: |
-          for f in "main/boards/bread-compact-wifi-lcd/config.json" \
-                   "main/boards/bread-compact-wifi-lcd/config.h" \
-                   "main/boards/bread-compact-wifi-lcd/bread-compact-wifi-lcd.cc" \
-                   "CMakeLists.txt" \
-                   "sdkconfig.defaults" \
-                   "scripts/release.py"; do
-            if [ ! -f "$f" ]; then
-              echo "::error::缺少关键文件: $f"
-              exit 1
-            fi
-          done
-
-      - name: 验证 JSON 格式
-        run: |
-          python -c "import json; c=json.load(open('main/boards/bread-compact-wifi-lcd/config.json')); print('✅ builds 类型:', type(c['builds'])); print('✅ 第一个构建名:', c['builds'][0]['name'])"
-
-      - name: 使用 release.py 构建固件
-        shell: bash
-        run: |
-          source $IDF_PATH/export.sh
-          python scripts/release.py bread-compact-wifi-lcd
-
-      - name: 收集并上传固件
-        if: always()
-        run: |
-          mkdir -p output_bin
-          cp build/merged-binary.bin output_bin/ 2>/dev/null || true
-          cp build/bootloader/bootloader.bin output_bin/ 2>/dev/null || true
-          cp build/partition-table.bin output_bin/ 2>/dev/null || true
-          cp build/xiaozhi-esp32-music.bin output_bin/ 2>/dev/null || true
-          ls -lh output_bin/
-
-      - name: 上传固件包
-        uses: actions/upload-artifact@v4
-        if: always()
+      # 2. 乐鑫官方CI容器，内置IDF v5.4，自动加载环境
+      - name: IDF5.4 编译ESP32S3固件
+        uses: espressif/esp-idf-ci-action@v1
         with:
-          name: xiaozhi-music-firmware
-          path: output_bin
+          esp_idf_version: v5.4
+          target: esp32s3
+          path: ./
+          command: |
+            idf.py fullclean
+            idf.py build
+
+      # 3. 上传编译产物，可在Actions页面下载bin固件
+      - name: 上传固件bin文件
+        uses: actions/upload-artifact@v4
+        with:
+          name: xiaozhi-esp32-music-esp32s3
+          path: |
+            build/*.bin
+            build/bootloader/bootloader.bin
+            build/partition_table/partition-table.bin
