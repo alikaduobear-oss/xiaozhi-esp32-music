@@ -1,38 +1,32 @@
-name: 小智ESP32S3音乐固件编译
+name: Build Xiaozhi ESP32S3 Music
 on:
   push:
-    branches: [ main, master ]
+    branches: [main, master]
   pull_request:
-    branches: [ main, master ]
-  workflow_dispatch: # 支持手动点击触发构建
+    branches: [main, master]
+  workflow_dispatch:
 
 jobs:
-  build_firmware:
+  build:
     runs-on: ubuntu-latest
     steps:
-      # 1. 拉取仓库全部代码
-      - name: 检出项目源码
+      - name: Checkout code & submodules
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
-          submodules: true # 拉取子组件，避免依赖缺失
+          submodules: true
 
-      # 2. 乐鑫官方CI容器，内置IDF v5.4，自动加载环境
-      - name: IDF5.4 编译ESP32S3固件
+      - name: Build with ESP-IDF v5.4 Docker CI Action
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4
           target: esp32s3
           path: ./
-          command: |
-            idf.py fullclean
-            idf.py build
+          command: idf.py fullclean build
 
-      # 3. 上传编译产物，可在Actions页面下载bin固件
-      - name: 上传固件bin文件
+      - name: Upload firmware bins
         uses: actions/upload-artifact@v4
         with:
-          name: xiaozhi-esp32-music-esp32s3
+          name: xiaozhi-esp32-music-firmware
           path: |
             build/*.bin
             build/bootloader/bootloader.bin
