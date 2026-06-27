@@ -1,21 +1,22 @@
-name: Build Xiaozhi ESP32S3 Music
+name: Xiaozhi ESP32 Music Build
 on:
   push:
-    branches: [main, master]
+    branches: [ main ]
   pull_request:
-    branches: [main, master]
-  workflow_dispatch:
+  workflow_dispatch
 
 jobs:
-  build:
+  build_firmware:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code & submodules
+      # 拉取代码+子模块
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
           submodules: true
 
-      - name: Build with ESP-IDF v5.4 Docker CI Action
+      # 纯docker方式，仅用官方有效esp-idf-ci-action，无不存在的action
+      - name: Build Firmware IDF 5.4 ESP32S3
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4
@@ -23,10 +24,11 @@ jobs:
           path: ./
           command: idf.py fullclean build
 
-      - name: Upload firmware bins
+      # 上传固件
+      - name: Upload Firmware Bin
         uses: actions/upload-artifact@v4
         with:
-          name: xiaozhi-esp32-music-firmware
+          name: firmware-esp32s3
           path: |
             build/*.bin
             build/bootloader/bootloader.bin
