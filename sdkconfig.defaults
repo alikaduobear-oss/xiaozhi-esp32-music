@@ -73,3 +73,18 @@ CONFIG_LV_USE_WIN=n
 
 CONFIG_LV_BUILD_EXAMPLES=n
 
+# ============================================
+# 板级配置 - bread-compact-wifi-lcd
+# ============================================
+CONFIG_BOARD_TYPE_BREAD_COMPACT_WIFI_LCD=y
+
+# 屏幕配置
+CONFIG_LCD_ST7735_128X160=y
+
+# PSRAM 配置 (ESP32-S3 N16R8)
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_80M=y
+
+# 音频 Simplex 模式（麦克风和功放分开）
+CONFIG_AUDIO_I2S_METHOD_SIMPLEX=y
