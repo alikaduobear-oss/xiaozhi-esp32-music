@@ -6,17 +6,15 @@ on:
   workflow_dispatch
 
 jobs:
-  build_firmware:
+  build:
     runs-on: ubuntu-latest
     steps:
-      # 拉取代码+子模块
-      - name: Checkout code
+      - name: Checkout code and submodules
         uses: actions/checkout@v4
         with:
           submodules: true
 
-      # 纯docker方式，仅用官方有效esp-idf-ci-action，无不存在的action
-      - name: Build Firmware IDF 5.4 ESP32S3
+      - name: Build with ESP-IDF v5.4
         uses: espressif/esp-idf-ci-action@v1
         with:
           esp_idf_version: v5.4
@@ -24,12 +22,8 @@ jobs:
           path: ./
           command: idf.py fullclean build
 
-      # 上传固件
-      - name: Upload Firmware Bin
+      - name: Upload firmware
         uses: actions/upload-artifact@v4
         with:
-          name: firmware-esp32s3
-          path: |
-            build/*.bin
-            build/bootloader/bootloader.bin
-            build/partition_table/partition-table.bin
+          name: esp32s3-firmware
+          path: build/*.bin
