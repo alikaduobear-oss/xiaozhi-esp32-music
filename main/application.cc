@@ -294,8 +294,12 @@ void Application::ToggleChatState()
     }
     else if (device_state_ == kDeviceStateSpeaking)
     {
+        // 修改：打断后进入监听状态，支持连续对话
         Schedule([this]()
-                 { AbortSpeaking(kAbortReasonNone); });
+                 { 
+                     AbortSpeaking(kAbortReasonNone);
+                     SetListeningMode(kListeningModeAutoStop);
+                 });
     }
     else if (device_state_ == kDeviceStateListening)
     {
@@ -687,7 +691,22 @@ void Application::OnWakeWordDetected()
     }
     else if (device_state_ == kDeviceStateSpeaking)
     {
+        // 修改：本地唤醒词打断 - 在说话状态下检测到唤醒词，立即打断并重新监听
+        ESP_LOGI(TAG, "Wake word interrupt during speaking");
+        
+        // 1. 发送打断信号到服务端
         AbortSpeaking(kAbortReasonWakeWordDetected);
+        
+        // 2. 清空音频解码队列，停止当前播放
+        audio_service_.ResetDecoder();
+        
+        // 3. 重新进入监听状态
+        SetListeningMode(listening_mode_);
+        
+        // 4. 播放提示音
+        audio_service_.PlaySound(Lang::Sounds::P3_POPUP);
+        
+        ESP_LOGI(TAG, "Wake word interrupt completed, now listening");
     }
     else if (device_state_ == kDeviceStateActivating)
     {
@@ -773,12 +792,8 @@ void Application::SetDeviceState(DeviceState state)
         if (listening_mode_ != kListeningModeRealtime)
         {
             audio_service_.EnableVoiceProcessing(false);
-            // Only AFE wake word can be detected in speaking mode
-#if CONFIG_USE_AFE_WAKE_WORD
+            // 修改：始终启用唤醒词检测，支持打断功能
             audio_service_.EnableWakeWordDetection(true);
-#else
-            audio_service_.EnableWakeWordDetection(false);
-#endif
         }
         audio_service_.ResetDecoder();
         break;
@@ -877,6 +892,7 @@ void Application::SetAecMode(AecMode mode)
             protocol_->CloseAudioChannel();
         } });
 }
+
 // 新增：接收外部音频数据（如音乐播放）
 void Application::AddAudioData(AudioStreamPacket &&packet)
 {
