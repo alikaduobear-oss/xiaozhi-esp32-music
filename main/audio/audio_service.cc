@@ -240,6 +240,10 @@ void AudioService::AudioInputTask() {
                 PushTaskToEncodeQueue(kAudioTaskTypeEncodeToTestingQueue, std::move(data));
                 continue;
             }
+            // 修改：失败不退出，继续循环
+            ESP_LOGW(TAG, "Audio testing read failed, continuing");
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
         }
 
         /* Feed the wake word */
@@ -251,6 +255,10 @@ void AudioService::AudioInputTask() {
                     wake_word_->Feed(data);
                     continue;
                 }
+                // 修改：失败不退出，继续循环
+                ESP_LOGW(TAG, "Wake word read failed, continuing");
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
             }
         }
 
@@ -263,11 +271,16 @@ void AudioService::AudioInputTask() {
                     audio_processor_->Feed(std::move(data));
                     continue;
                 }
+                // 修改：失败不退出，继续循环
+                ESP_LOGW(TAG, "Audio processor read failed, continuing");
+                vTaskDelay(pdMS_TO_TICKS(10));
+                continue;
             }
         }
 
-        ESP_LOGE(TAG, "Should not be here, bits: %lx", bits);
-        break;
+        // 修改：不应该到这里，但如果到了，继续循环而不是 break
+        ESP_LOGW(TAG, "No audio task active, bits: %lx, waiting...", bits);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
     ESP_LOGW(TAG, "Audio input task stopped");
@@ -475,6 +488,12 @@ void AudioService::EnableWakeWordDetection(bool enable) {
 
     ESP_LOGD(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
     if (enable) {
+        // 修改：确保麦克风已启用
+        if (!codec_->input_enabled()) {
+            codec_->EnableInput(true);
+            ESP_LOGI(TAG, "Enabling audio input for wake word detection");
+        }
+        
         if (!wake_word_initialized_) {
             if (!wake_word_->Initialize(codec_)) {
                 ESP_LOGE(TAG, "Failed to initialize wake word");
@@ -484,6 +503,8 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         }
         wake_word_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
+        // 修改：确保定时器运行，防止麦克风被关闭
+        esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
     } else {
         wake_word_->Stop();
         xEventGroupClearBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
@@ -574,7 +595,12 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     auto now = std::chrono::steady_clock::now();
     auto input_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
     auto output_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_output_time_).count();
-    if (input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled()) {
+    
+    // 修改：如果唤醒词检测正在运行，不关闭麦克风
+    EventBits_t bits = xEventGroupGetBits(event_group_);
+    bool wake_word_running = (bits & AS_EVENT_WAKE_WORD_RUNNING) != 0;
+    
+    if (!wake_word_running && input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled()) {
         codec_->EnableInput(false);
     }
     if (output_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->output_enabled()) {
