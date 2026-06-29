@@ -26,7 +26,7 @@ class CompactWifiBoardLCD : public WifiBoard {
 private:
     Button boot_button_;
     LcdDisplay* display_;
-    bool wake_word_detected_ = false;  // 新增：唤醒词检测标志
+    bool wake_word_detected_ = false;
 
     void InitializeSpi() {
         spi_bus_config_t buscfg = {};
@@ -87,8 +87,16 @@ private:
                                     });
     }
 
+    // ========== 修改点：在 InitializeButtons 的 OnClick 中插入 Stop() ==========
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
+            // ----- 新增：立即停止音频播放 -----
+            auto audio_codec = GetAudioCodec();
+            if (audio_codec != nullptr) {
+                audio_codec->Stop();
+                ESP_LOGI(TAG, "Button click: audio stopped for interrupt");
+            }
+            // ----- 原有逻辑继续 -----
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
@@ -96,7 +104,7 @@ private:
             app.ToggleChatState();
         });
 
-        // 新增：长按按钮强制打断（备用方案）
+        // 长按打断（保留原有）
         boot_button_.OnLongPress([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateSpeaking) {
@@ -105,19 +113,19 @@ private:
             }
         });
     }
+    // ========== 修改结束 ==========
 
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
     }
 
-    // 新增：处理唤醒词检测事件
     void OnWakeWordDetected() {
         wake_word_detected_ = true;
         auto& app = Application::GetInstance();
         
         if (app.GetDeviceState() == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "Wake word detected during speaking, triggering interrupt");
-            app.ToggleChatState();  // 这会触发打断并进入监听
+            app.ToggleChatState();
         } else if (app.GetDeviceState() == kDeviceStateIdle) {
             ESP_LOGI(TAG, "Wake word detected in idle, starting conversation");
             app.ToggleChatState();
@@ -145,12 +153,10 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
-        // 修改：使用 Simplex 模式，麦克风和喇叭独立控制
         static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
             AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
             AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
         
-        // 新增：确保麦克风输入始终启用（用于后台唤醒词检测）
         audio_codec.EnableInput(true);
         ESP_LOGI(TAG, "Audio codec initialized with input always enabled for wake word detection");
 #else
@@ -172,12 +178,10 @@ public:
         return nullptr;
     }
 
-    // 新增：获取唤醒词检测状态
     bool IsWakeWordDetected() const {
         return wake_word_detected_;
     }
 
-    // 新增：重置唤醒词检测状态
     void ResetWakeWordDetection() {
         wake_word_detected_ = false;
     }
