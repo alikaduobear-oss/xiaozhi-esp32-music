@@ -3,6 +3,7 @@
 #include <esp_log.h>
 #include <cmath>
 #include <cstring>
+#include <cstdint>   // 确保 int16_t 定义
 
 #define TAG "NoAudioCodec"
 
@@ -395,7 +396,7 @@ void NoAudioCodec::EnableInput(bool enable) {
     }
 }
 
-// ========== 新增：覆盖基类的 EnableOutput（保持状态一致） ==========
+// ========== 覆盖基类的 EnableOutput（保持状态一致） ==========
 void NoAudioCodec::EnableOutput(bool enable) {
     // 直接调用基类的 EnableOutput，它已经实现了硬件操作
     AudioCodec::EnableOutput(enable);
