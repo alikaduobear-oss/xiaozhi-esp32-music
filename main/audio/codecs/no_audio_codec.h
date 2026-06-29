@@ -13,43 +13,43 @@ private:
 public:
     virtual ~NoAudioCodec();
 
-    // 覆盖基类的带参 EnableInput (外部调用需要)
+    // 覆盖基类的虚函数
     void EnableInput(bool enable) override;
+    void EnableOutput(bool enable) override;   // 关键
 
-    // 额外的接口（可保留）
+    // 额外接口
     int ReadNonBlocking(int16_t* dest, int samples);
-    void EnableInput();          // 无参版本（兼容旧代码）
+    void EnableInput();
     void DisableInput();
     bool IsInputEnabled() const;
 };
 
 class NoAudioCodecDuplex : public NoAudioCodec {
 public:
-    NoAudioCodecDuplex(int input_sample_rate, int output_sample_rate, 
-                       gpio_num_t bclk, gpio_num_t ws, 
+    NoAudioCodecDuplex(int input_sample_rate, int output_sample_rate,
+                       gpio_num_t bclk, gpio_num_t ws,
                        gpio_num_t dout, gpio_num_t din);
 };
 
 class NoAudioCodecSimplex : public NoAudioCodec {
 public:
     NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate,
-                        gpio_num_t spk_bclk, gpio_num_t spk_ws, 
-                        gpio_num_t spk_dout, gpio_num_t mic_sck, 
+                        gpio_num_t spk_bclk, gpio_num_t spk_ws,
+                        gpio_num_t spk_dout, gpio_num_t mic_sck,
                         gpio_num_t mic_ws, gpio_num_t mic_din);
     NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate,
-                        gpio_num_t spk_bclk, gpio_num_t spk_ws, 
+                        gpio_num_t spk_bclk, gpio_num_t spk_ws,
                         gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask,
-                        gpio_num_t mic_sck, gpio_num_t mic_ws, 
+                        gpio_num_t mic_sck, gpio_num_t mic_ws,
                         gpio_num_t mic_din, i2s_std_slot_mask_t mic_slot_mask);
 };
 
 class NoAudioCodecSimplexPdm : public NoAudioCodec {
 public:
     NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate,
-                           gpio_num_t spk_bclk, gpio_num_t spk_ws, 
-                           gpio_num_t spk_dout, gpio_num_t mic_sck, 
+                           gpio_num_t spk_bclk, gpio_num_t spk_ws,
+                           gpio_num_t spk_dout, gpio_num_t mic_sck,
                            gpio_num_t mic_din);
-    // 注意：此处公有覆盖基类 private 虚函数，可能引发警告，但通常不影响运行
     int Read(int16_t* dest, int samples) override;
 };
 
