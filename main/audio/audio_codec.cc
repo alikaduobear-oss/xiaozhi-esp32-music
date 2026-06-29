@@ -40,37 +40,14 @@ void AudioCodec::Start() {
         ESP_LOGI(TAG, "Saved original output sample rate: %d Hz", original_output_sample_rate_);
     }
 
-    // ----- 启用输出通道（带详细日志）-----
-    if (tx_handle_ != nullptr) {
-        esp_err_t err = i2s_channel_enable(tx_handle_);
-        if (err == ESP_OK) {
-            output_enabled_ = true;
-            ESP_LOGI(TAG, "✅ Output channel enabled successfully");
-        } else {
-            ESP_LOGE(TAG, "❌ Failed to enable output channel: %s (0x%x)", esp_err_to_name(err), err);
-        }
-    } else {
-        ESP_LOGE(TAG, "❌ tx_handle_ is NULL, cannot enable output");
-    }
-
-    if (rx_handle_ != nullptr) {
-        esp_err_t err = i2s_channel_enable(rx_handle_);
-        if (err == ESP_OK) {
-            input_enabled_ = true;
-            ESP_LOGI(TAG, "✅ Input channel enabled successfully");
-        } else {
-            ESP_LOGE(TAG, "❌ Failed to enable input channel: %s", esp_err_to_name(err));
-        }
-    }
-
-    // 注意：这里的 EnableInput(true) 和 EnableOutput(true) 可能会与上面的重复，
-    // 但它们是设置标志位，不影响硬件，可以保留。
-    EnableInput(true);
+    // 启用输出和输入通道（通过调用 Enable 方法，它们会操作硬件）
     EnableOutput(true);
+    EnableInput(true);
 
     ESP_LOGI(TAG, "🎵 Audio codec started, output_enabled=%d, input_enabled=%d",
              output_enabled_, input_enabled_);
 }
+
 void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
@@ -79,20 +56,72 @@ void AudioCodec::SetOutputVolume(int volume) {
     settings.SetInt("output_volume", output_volume_);
 }
 
+// ========== 核心修改：EnableInput 真正操作硬件 ==========
 void AudioCodec::EnableInput(bool enable) {
     if (enable == input_enabled_) {
         return;
     }
-    input_enabled_ = enable;
-    ESP_LOGI(TAG, "Set input enable to %s", enable ? "true" : "false");
+
+    esp_err_t err;
+    if (enable) {
+        if (rx_handle_ != nullptr) {
+            err = i2s_channel_enable(rx_handle_);
+            if (err == ESP_OK) {
+                input_enabled_ = true;
+                ESP_LOGI(TAG, "✅ Input channel enabled");
+            } else {
+                ESP_LOGE(TAG, "❌ Failed to enable input: %s", esp_err_to_name(err));
+            }
+        } else {
+            ESP_LOGW(TAG, "rx_handle_ is null, cannot enable input");
+        }
+    } else {
+        if (rx_handle_ != nullptr) {
+            err = i2s_channel_disable(rx_handle_);
+            if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+                input_enabled_ = false;
+                ESP_LOGI(TAG, "Input channel disabled");
+            } else {
+                ESP_LOGE(TAG, "Failed to disable input: %s", esp_err_to_name(err));
+            }
+        } else {
+            input_enabled_ = false;
+        }
+    }
 }
 
+// ========== 核心修改：EnableOutput 真正操作硬件 ==========
 void AudioCodec::EnableOutput(bool enable) {
     if (enable == output_enabled_) {
         return;
     }
-    output_enabled_ = enable;
-    ESP_LOGI(TAG, "Set output enable to %s", enable ? "true" : "false");
+
+    esp_err_t err;
+    if (enable) {
+        if (tx_handle_ != nullptr) {
+            err = i2s_channel_enable(tx_handle_);
+            if (err == ESP_OK) {
+                output_enabled_ = true;
+                ESP_LOGI(TAG, "✅ Output channel enabled");
+            } else {
+                ESP_LOGE(TAG, "❌ Failed to enable output: %s (0x%x)", esp_err_to_name(err), err);
+            }
+        } else {
+            ESP_LOGE(TAG, "❌ tx_handle_ is NULL, cannot enable output");
+        }
+    } else {
+        if (tx_handle_ != nullptr) {
+            err = i2s_channel_disable(tx_handle_);
+            if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
+                output_enabled_ = false;
+                ESP_LOGI(TAG, "Output channel disabled");
+            } else {
+                ESP_LOGE(TAG, "Failed to disable output: %s", esp_err_to_name(err));
+            }
+        } else {
+            output_enabled_ = false;
+        }
+    }
 }
 
 bool AudioCodec::SetOutputSampleRate(int sample_rate) {
@@ -125,17 +154,16 @@ bool AudioCodec::SetOutputSampleRate(int sample_rate) {
     
     ESP_LOGI(TAG, "Changing output sample rate from %d to %d Hz", output_sample_rate_, sample_rate);
     
-    // 先尝试禁用 I2S 通道（如果已启用的话）
-    bool was_enabled = false;
-    esp_err_t disable_ret = i2s_channel_disable(tx_handle_);
-    if (disable_ret == ESP_OK) {
-        was_enabled = true;
-        ESP_LOGI(TAG, "Disabled I2S TX channel for reconfiguration");
-    } else if (disable_ret == ESP_ERR_INVALID_STATE) {
-        // 通道可能已经是禁用状态，这是正常的
-        ESP_LOGI(TAG, "I2S TX channel was already disabled");
-    } else {
-        ESP_LOGW(TAG, "Failed to disable I2S TX channel: %s", esp_err_to_name(disable_ret));
+    // 先禁用通道（如果已启用）
+    bool was_enabled = output_enabled_;
+    if (was_enabled) {
+        esp_err_t disable_ret = i2s_channel_disable(tx_handle_);
+        if (disable_ret == ESP_OK || disable_ret == ESP_ERR_INVALID_STATE) {
+            ESP_LOGI(TAG, "I2S TX channel disabled for reconfiguration");
+        } else {
+            ESP_LOGW(TAG, "Failed to disable I2S TX channel: %s", esp_err_to_name(disable_ret));
+        }
+        output_enabled_ = false;
     }
     
     // 重新配置 I2S 时钟
@@ -150,12 +178,15 @@ bool AudioCodec::SetOutputSampleRate(int sample_rate) {
     
     esp_err_t ret = i2s_channel_reconfig_std_clock(tx_handle_, &clk_cfg);
     
-    // 重新启用通道（无论之前是什么状态，现在都需要启用以便播放音频）
-    esp_err_t enable_ret = i2s_channel_enable(tx_handle_);
-    if (enable_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to enable I2S TX channel: %s", esp_err_to_name(enable_ret));
-    } else {
-        ESP_LOGI(TAG, "Enabled I2S TX channel");
+    // 如果之前是启用状态，重新启用
+    if (was_enabled) {
+        esp_err_t enable_ret = i2s_channel_enable(tx_handle_);
+        if (enable_ret == ESP_OK) {
+            output_enabled_ = true;
+            ESP_LOGI(TAG, "Re-enabled I2S TX channel");
+        } else {
+            ESP_LOGE(TAG, "Failed to re-enable I2S TX channel: %s", esp_err_to_name(enable_ret));
+        }
     }
     
     if (ret == ESP_OK) {
@@ -167,12 +198,12 @@ bool AudioCodec::SetOutputSampleRate(int sample_rate) {
         return false;
     }
 }
+
 void AudioCodec::Stop() {
     ESP_LOGI(TAG, "Audio codec stop requested");
 
-    // 1. 禁用 I2S 发送通道（扬声器输出）
+    // 禁用输出通道
     if (tx_handle_ != nullptr) {
-        // 先尝试禁用通道，忽略可能的错误（如果已经禁用）
         esp_err_t err = i2s_channel_disable(tx_handle_);
         if (err == ESP_OK) {
             ESP_LOGI(TAG, "I2S TX channel disabled");
@@ -183,12 +214,6 @@ void AudioCodec::Stop() {
         }
     }
 
-    // 2. 如果也有接收通道（麦克风），也可以禁用，但一般保留给唤醒词
-    // 这里只处理输出，所以暂时不处理 rx_handle_
-
-    // 3. 更新状态标志（基类成员）
     output_enabled_ = false;
-    // input_enabled_ 保留，不影响打断
-
     ESP_LOGI(TAG, "Audio codec stopped (output disabled)");
 }
