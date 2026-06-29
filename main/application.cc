@@ -658,6 +658,14 @@ void Application::OnWakeWordDetected()
         return;
     }
 
+    // ===== 新增：立即停止音频播放 =====
+    auto& board = Board::GetInstance();
+    auto codec = board.GetAudioCodec();
+    if (codec) {
+        codec->Stop();
+        ESP_LOGI(TAG, "Wake word detected: audio stopped");
+    }
+
     if (device_state_ == kDeviceStateIdle)
     {
         audio_service_.EncodeWakeWord();
