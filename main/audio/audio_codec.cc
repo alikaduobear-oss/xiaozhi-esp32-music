@@ -27,30 +27,18 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
 }
 
 void AudioCodec::Start() {
-    Settings settings("audio", false);
-    output_volume_ = settings.GetInt("output_volume", output_volume_);
-    if (output_volume_ <= 0) {
-        ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
-        output_volume_ = 10;
-    }
-
-    // 保存原始输出采样率
-    if (original_output_sample_rate_ == 0) {
-        original_output_sample_rate_ = output_sample_rate_;
-        ESP_LOGI(TAG, "Saved original output sample rate: %d Hz", original_output_sample_rate_);
-    }
-
-    // ========== 修改开始 ==========
-    // 只有在尚未启用时才启用通道，避免重复启用报错
+    // ... 前面的代码不变 ...
     if (tx_handle_ != nullptr && !output_enabled_) {
         ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
+        output_enabled_ = true;
+        ESP_LOGI(TAG, "Output channel enabled");
     }
     if (rx_handle_ != nullptr && !input_enabled_) {
         ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+        input_enabled_ = true;
+        ESP_LOGI(TAG, "Input channel enabled");
     }
-    // ========== 修改结束 ==========
-
-    EnableInput(true);
+    EnableInput(true);   // 这个可能会重复启用，但我们已经加了判断
     EnableOutput(true);
     ESP_LOGI(TAG, "Audio codec started");
 }
