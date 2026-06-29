@@ -151,7 +151,7 @@ public:
             AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
         
         // 新增：确保麦克风输入始终启用（用于后台唤醒词检测）
-        audio_codec.EnableInput();
+        audio_codec.EnableInput(true);
         ESP_LOGI(TAG, "Audio codec initialized with input always enabled for wake word detection");
 #else
         static NoAudioCodecDuplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
