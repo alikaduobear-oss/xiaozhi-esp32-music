@@ -4,7 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <driver/i2s_std.h>
-
+#include <driver/gpio.h>  // 新增
 #include <vector>
 #include <string>
 #include <functional>
