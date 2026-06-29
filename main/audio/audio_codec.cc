@@ -27,22 +27,50 @@ bool AudioCodec::InputData(std::vector<int16_t>& data) {
 }
 
 void AudioCodec::Start() {
-    // ... 前面的代码不变 ...
-    if (tx_handle_ != nullptr && !output_enabled_) {
-        ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
-        output_enabled_ = true;
-        ESP_LOGI(TAG, "Output channel enabled");
+    Settings settings("audio", false);
+    output_volume_ = settings.GetInt("output_volume", output_volume_);
+    if (output_volume_ <= 0) {
+        ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
+        output_volume_ = 10;
     }
-    if (rx_handle_ != nullptr && !input_enabled_) {
-        ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
-        input_enabled_ = true;
-        ESP_LOGI(TAG, "Input channel enabled");
-    }
-    EnableInput(true);   // 这个可能会重复启用，但我们已经加了判断
-    EnableOutput(true);
-    ESP_LOGI(TAG, "Audio codec started");
-}
 
+    // 保存原始输出采样率
+    if (original_output_sample_rate_ == 0) {
+        original_output_sample_rate_ = output_sample_rate_;
+        ESP_LOGI(TAG, "Saved original output sample rate: %d Hz", original_output_sample_rate_);
+    }
+
+    // ----- 启用输出通道（带详细日志）-----
+    if (tx_handle_ != nullptr) {
+        esp_err_t err = i2s_channel_enable(tx_handle_);
+        if (err == ESP_OK) {
+            output_enabled_ = true;
+            ESP_LOGI(TAG, "✅ Output channel enabled successfully");
+        } else {
+            ESP_LOGE(TAG, "❌ Failed to enable output channel: %s (0x%x)", esp_err_to_name(err), err);
+        }
+    } else {
+        ESP_LOGE(TAG, "❌ tx_handle_ is NULL, cannot enable output");
+    }
+
+    if (rx_handle_ != nullptr) {
+        esp_err_t err = i2s_channel_enable(rx_handle_);
+        if (err == ESP_OK) {
+            input_enabled_ = true;
+            ESP_LOGI(TAG, "✅ Input channel enabled successfully");
+        } else {
+            ESP_LOGE(TAG, "❌ Failed to enable input channel: %s", esp_err_to_name(err));
+        }
+    }
+
+    // 注意：这里的 EnableInput(true) 和 EnableOutput(true) 可能会与上面的重复，
+    // 但它们是设置标志位，不影响硬件，可以保留。
+    EnableInput(true);
+    EnableOutput(true);
+
+    ESP_LOGI(TAG, "🎵 Audio codec started, output_enabled=%d, input_enabled=%d",
+             output_enabled_, input_enabled_);
+}
 void AudioCodec::SetOutputVolume(int volume) {
     output_volume_ = volume;
     ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
