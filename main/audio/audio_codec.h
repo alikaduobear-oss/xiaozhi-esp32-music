@@ -4,7 +4,7 @@
 #include <freertos/FreeRTOS.h>
 #include <freertos/event_groups.h>
 #include <driver/i2s_std.h>
-#include <driver/gpio.h>  // 新增
+#include <driver/gpio.h>
 #include <vector>
 #include <string>
 #include <functional>
@@ -25,7 +25,8 @@ public:
     virtual void OutputData(std::vector<int16_t>& data);
     virtual bool InputData(std::vector<int16_t>& data);
     virtual void Start();
-    
+    virtual void Stop();   // 新增：停止播放并禁用输出
+
     inline bool duplex() const { return duplex_; }
     inline bool input_reference() const { return input_reference_; }
     inline int input_sample_rate() const { return input_sample_rate_; }
