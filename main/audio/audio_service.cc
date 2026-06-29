@@ -1,6 +1,11 @@
 #include "audio_service.h"
 #include <esp_log.h>
-#include "board.h"  // 新增
+#include "board.h"
+#include <chrono>
+#include <mutex>
+#include <deque>
+#include <condition_variable>
+
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
 #else
@@ -17,6 +22,20 @@
 
 #define TAG "AudioService"
 
+// 用于音频任务的事件标志
+#define AS_EVENT_AUDIO_TESTING_RUNNING   (1 << 0)
+#define AS_EVENT_WAKE_WORD_RUNNING       (1 << 1)
+#define AS_EVENT_AUDIO_PROCESSOR_RUNNING (1 << 2)
+
+#define OPUS_FRAME_DURATION_MS           60
+#define MAX_ENCODE_TASKS_IN_QUEUE        100
+#define MAX_DECODE_PACKETS_IN_QUEUE      100
+#define MAX_PLAYBACK_TASKS_IN_QUEUE      100
+#define MAX_SEND_PACKETS_IN_QUEUE        50
+#define MAX_TIMESTAMPS_IN_QUEUE          50
+
+#define AUDIO_POWER_CHECK_INTERVAL_MS    1000
+#define AUDIO_POWER_TIMEOUT_MS           5000   // 5秒无活动则关闭电源
 
 AudioService::AudioService() {
     event_group_ = xEventGroupCreate();
@@ -27,7 +46,6 @@ AudioService::~AudioService() {
         vEventGroupDelete(event_group_);
     }
 }
-
 
 void AudioService::Initialize(AudioCodec* codec) {
     codec_ = codec;
@@ -194,7 +212,6 @@ bool AudioService::ReadAudioData(std::vector<int16_t>& data, int sample_rate, in
     debug_statistics_.input_count++;
 
 #if CONFIG_USE_AUDIO_DEBUGGER
-    // 音频调试：发送原始音频数据
     if (audio_debugger_ == nullptr) {
         audio_debugger_ = std::make_unique<AudioDebugger>();
     }
@@ -229,7 +246,6 @@ void AudioService::AudioInputTask() {
             std::vector<int16_t> data;
             int samples = OPUS_FRAME_DURATION_MS * 16000 / 1000;
             if (ReadAudioData(data, 16000, samples)) {
-                // If input channels is 2, we need to fetch the left channel data
                 if (codec_->input_channels() == 2) {
                     auto mono_data = std::vector<int16_t>(data.size() / 2);
                     for (size_t i = 0, j = 0; i < mono_data.size(); ++i, j += 2) {
@@ -240,7 +256,6 @@ void AudioService::AudioInputTask() {
                 PushTaskToEncodeQueue(kAudioTaskTypeEncodeToTestingQueue, std::move(data));
                 continue;
             }
-            // 修改：失败不退出，继续循环
             ESP_LOGW(TAG, "Audio testing read failed, continuing");
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
@@ -255,7 +270,6 @@ void AudioService::AudioInputTask() {
                     wake_word_->Feed(data);
                     continue;
                 }
-                // 修改：失败不退出，继续循环
                 ESP_LOGW(TAG, "Wake word read failed, continuing");
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
@@ -271,14 +285,12 @@ void AudioService::AudioInputTask() {
                     audio_processor_->Feed(std::move(data));
                     continue;
                 }
-                // 修改：失败不退出，继续循环
                 ESP_LOGW(TAG, "Audio processor read failed, continuing");
                 vTaskDelay(pdMS_TO_TICKS(10));
                 continue;
             }
         }
 
-        // 修改：不应该到这里，但如果到了，继续循环而不是 break
         ESP_LOGW(TAG, "No audio task active, bits: %lx, waiting...", bits);
         vTaskDelay(pdMS_TO_TICKS(100));
     }
@@ -299,10 +311,19 @@ void AudioService::AudioOutputTask() {
         audio_queue_cv_.notify_all();
         lock.unlock();
 
+        // ========== 关键修改：确保输出启用 ==========
         if (!codec_->output_enabled()) {
+            ESP_LOGI(TAG, "Output was disabled, re-enabling before playback");
             codec_->EnableOutput(true);
-            esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
+            // 如果 EnableOutput 只是设置标志，我们需要同时启动硬件
+            // 但 EnableOutput 内部会调用 i2s_channel_enable 或设置标志，
+            // 取决于实现。我们额外调用 Start() 确保硬件启用
+            if (!codec_->output_enabled()) {
+                ESP_LOGW(TAG, "EnableOutput didn't enable hardware, calling Start()");
+                codec_->Start();  // 确保硬件启用
+            }
         }
+
         codec_->OutputData(task->pcm);
 
         /* Update the last output time */
@@ -310,7 +331,6 @@ void AudioService::AudioOutputTask() {
         debug_statistics_.playback_count++;
 
 #if CONFIG_USE_SERVER_AEC
-        /* Record the timestamp for server AEC */
         if (task->timestamp > 0) {
             lock.lock();
             timestamp_queue_.push_back(task->timestamp);
@@ -420,10 +440,8 @@ void AudioService::PushTaskToEncodeQueue(AudioTaskType type, std::vector<int16_t
     task->type = type;
     task->pcm = std::move(pcm);
     
-    /* Push the task to the encode queue */
     std::unique_lock<std::mutex> lock(audio_queue_mutex_);
 
-    /* If the task is to send queue, we need to set the timestamp */
     if (type == kAudioTaskTypeEncodeToSendQueue && !timestamp_queue_.empty()) {
         if (timestamp_queue_.size() <= MAX_TIMESTAMPS_IN_QUEUE) {
             task->timestamp = timestamp_queue_.front();
@@ -488,7 +506,6 @@ void AudioService::EnableWakeWordDetection(bool enable) {
 
     ESP_LOGD(TAG, "%s wake word detection", enable ? "Enabling" : "Disabling");
     if (enable) {
-        // 修改：确保麦克风已启用
         if (!codec_->input_enabled()) {
             codec_->EnableInput(true);
             ESP_LOGI(TAG, "Enabling audio input for wake word detection");
@@ -503,7 +520,6 @@ void AudioService::EnableWakeWordDetection(bool enable) {
         }
         wake_word_->Start();
         xEventGroupSetBits(event_group_, AS_EVENT_WAKE_WORD_RUNNING);
-        // 修改：确保定时器运行，防止麦克风被关闭
         esp_timer_start_periodic(audio_power_timer_, AUDIO_POWER_CHECK_INTERVAL_MS * 1000);
     } else {
         wake_word_->Stop();
@@ -519,7 +535,6 @@ void AudioService::EnableVoiceProcessing(bool enable) {
             audio_processor_initialized_ = true;
         }
 
-        /* We should make sure no audio is playing */
         ResetDecoder();
         audio_input_need_warmup_ = true;
         audio_processor_->Start();
@@ -536,7 +551,6 @@ void AudioService::EnableAudioTesting(bool enable) {
         xEventGroupSetBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING);
     } else {
         xEventGroupClearBits(event_group_, AS_EVENT_AUDIO_TESTING_RUNNING);
-        /* Copy audio_testing_queue_ to audio_decode_queue_ */
         std::lock_guard<std::mutex> lock(audio_queue_mutex_);
         audio_decode_queue_ = std::move(audio_testing_queue_);
         audio_queue_cv_.notify_all();
@@ -596,9 +610,20 @@ void AudioService::CheckAndUpdateAudioPowerState() {
     auto input_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_input_time_).count();
     auto output_elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(now - last_output_time_).count();
     
-    // 修改：如果唤醒词检测正在运行，不关闭麦克风
     EventBits_t bits = xEventGroupGetBits(event_group_);
     bool wake_word_running = (bits & AS_EVENT_WAKE_WORD_RUNNING) != 0;
+    
+    // ===== 修改：检查是否有待播放数据 =====
+    bool has_pending_playback = false;
+    {
+        std::lock_guard<std::mutex> lock(audio_queue_mutex_);
+        has_pending_playback = !audio_playback_queue_.empty() || !audio_decode_queue_.empty();
+    }
+    
+    // 如果有待播放数据，不关闭输出
+    if (has_pending_playback) {
+        return;
+    }
     
     if (!wake_word_running && input_elapsed > AUDIO_POWER_TIMEOUT_MS && codec_->input_enabled()) {
         codec_->EnableInput(false);
