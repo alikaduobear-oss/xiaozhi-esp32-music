@@ -13,6 +13,12 @@ private:
 
 public:
     virtual ~NoAudioCodec();
+ // ========== 新增声明 ==========
+    int ReadNonBlocking(int16_t* dest, int samples);
+    void EnableInput();          // 无参版本，与基类 EnableInput(bool) 形成重载
+    void DisableInput();
+    bool IsInputEnabled() const;
+    // ==============================
 };
 
 class NoAudioCodecDuplex : public NoAudioCodec {
