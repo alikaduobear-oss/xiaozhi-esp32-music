@@ -329,7 +329,8 @@ int NoAudioCodecSimplexPdm::Read(int16_t* dest, int samples) {
     // 计算实际读取的样本数
     return bytes_read / sizeof(int16_t);
 }
-// ===== 新增：非阻塞读取 =====
+
+// ========== 非阻塞读取 ==========
 int NoAudioCodec::ReadNonBlocking(int16_t* dest, int samples) {
     size_t bytes_read = 0;
     std::vector<int32_t> bit32_buffer(samples);
@@ -354,25 +355,32 @@ int NoAudioCodec::ReadNonBlocking(int16_t* dest, int samples) {
     return samples;
 }
 
-// ===== 新增：启用输入（麦克风） =====
+// ========== 原有启用/禁用输入（改为调用带参版本） ==========
 void NoAudioCodec::EnableInput() {
-    if (rx_handle_ != nullptr && !input_enabled_) {
-        ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
-        input_enabled_ = true;
-        ESP_LOGI(TAG, "Input enabled");
-    }
+    EnableInput(true);   // 调用带参版本
 }
 
-// ===== 新增：禁用输入（麦克风） =====
 void NoAudioCodec::DisableInput() {
-    if (rx_handle_ != nullptr && input_enabled_) {
-        ESP_ERROR_CHECK(i2s_channel_disable(rx_handle_));
-        input_enabled_ = false;
-        ESP_LOGI(TAG, "Input disabled");
-    }
+    EnableInput(false);
 }
 
-// ===== 新增：查询输入是否启用 =====
 bool NoAudioCodec::IsInputEnabled() const {
     return input_enabled_;
+}
+
+// ========== 新增：带参数的启用输入（覆盖基类虚函数） ==========
+void NoAudioCodec::EnableInput(bool enable) {
+    if (enable) {
+        if (rx_handle_ != nullptr && !input_enabled_) {
+            ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+            input_enabled_ = true;
+            ESP_LOGI(TAG, "Input enabled (with param)");
+        }
+    } else {
+        if (rx_handle_ != nullptr && input_enabled_) {
+            ESP_ERROR_CHECK(i2s_channel_disable(rx_handle_));
+            input_enabled_ = false;
+            ESP_LOGI(TAG, "Input disabled (with param)");
+        }
+    }
 }
