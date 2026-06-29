@@ -151,3 +151,28 @@ bool AudioCodec::SetOutputSampleRate(int sample_rate) {
         return false;
     }
 }
+void AudioCodec::Stop() {
+    ESP_LOGI(TAG, "Audio codec stop requested");
+
+    // 1. 禁用 I2S 发送通道（扬声器输出）
+    if (tx_handle_ != nullptr) {
+        // 先尝试禁用通道，忽略可能的错误（如果已经禁用）
+        esp_err_t err = i2s_channel_disable(tx_handle_);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "I2S TX channel disabled");
+        } else if (err == ESP_ERR_INVALID_STATE) {
+            ESP_LOGI(TAG, "I2S TX channel already disabled");
+        } else {
+            ESP_LOGW(TAG, "Failed to disable I2S TX: %s", esp_err_to_name(err));
+        }
+    }
+
+    // 2. 如果也有接收通道（麦克风），也可以禁用，但一般保留给唤醒词
+    // 这里只处理输出，所以暂时不处理 rx_handle_
+
+    // 3. 更新状态标志（基类成员）
+    output_enabled_ = false;
+    // input_enabled_ 保留，不影响打断
+
+    ESP_LOGI(TAG, "Audio codec stopped (output disabled)");
+}
