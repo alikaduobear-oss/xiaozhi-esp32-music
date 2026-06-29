@@ -1,219 +1,377 @@
-#include "audio_codec.h"
-#include "board.h"
-#include "settings.h"
+#include "no_audio_codec.h"
 
 #include <esp_log.h>
+#include <cmath>
 #include <cstring>
-#include <driver/i2s_common.h>
+#include <cstdint>
 
-#define TAG "AudioCodec"
+#define TAG "NoAudioCodec"
 
-AudioCodec::AudioCodec() {
-}
-
-AudioCodec::~AudioCodec() {
-}
-
-void AudioCodec::OutputData(std::vector<int16_t>& data) {
-    Write(data.data(), data.size());
-}
-
-bool AudioCodec::InputData(std::vector<int16_t>& data) {
-    int samples = Read(data.data(), data.size());
-    if (samples > 0) {
-        return true;
+NoAudioCodec::~NoAudioCodec() {
+    if (rx_handle_ != nullptr) {
+        ESP_ERROR_CHECK(i2s_channel_disable(rx_handle_));
     }
-    return false;
-}
-
-void AudioCodec::Start() {
-    Settings settings("audio", false);
-    output_volume_ = settings.GetInt("output_volume", output_volume_);
-    if (output_volume_ <= 0) {
-        ESP_LOGW(TAG, "Output volume value (%d) is too small, setting to default (10)", output_volume_);
-        output_volume_ = 10;
-    }
-
-    // 保存原始输出采样率
-    if (original_output_sample_rate_ == 0) {
-        original_output_sample_rate_ = output_sample_rate_;
-        ESP_LOGI(TAG, "Saved original output sample rate: %d Hz", original_output_sample_rate_);
-    }
-
-    // 启用输出和输入通道（通过调用 Enable 方法，它们会操作硬件）
-    EnableOutput(true);
-    EnableInput(true);
-
-    ESP_LOGI(TAG, "🎵 Audio codec started, output_enabled=%d, input_enabled=%d",
-             output_enabled_, input_enabled_);
-}
-
-void AudioCodec::SetOutputVolume(int volume) {
-    output_volume_ = volume;
-    ESP_LOGI(TAG, "Set output volume to %d", output_volume_);
-    
-    Settings settings("audio", true);
-    settings.SetInt("output_volume", output_volume_);
-}
-
-// ========== 核心修改：EnableInput 真正操作硬件 ==========
-void AudioCodec::EnableInput(bool enable) {
-    if (enable == input_enabled_) {
-        return;
-    }
-
-    esp_err_t err;
-    if (enable) {
-        if (rx_handle_ != nullptr) {
-            err = i2s_channel_enable(rx_handle_);
-            if (err == ESP_OK) {
-                input_enabled_ = true;
-                ESP_LOGI(TAG, "✅ Input channel enabled");
-            } else {
-                ESP_LOGE(TAG, "❌ Failed to enable input: %s", esp_err_to_name(err));
-            }
-        } else {
-            ESP_LOGW(TAG, "rx_handle_ is null, cannot enable input");
-        }
-    } else {
-        if (rx_handle_ != nullptr) {
-            err = i2s_channel_disable(rx_handle_);
-            if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
-                input_enabled_ = false;
-                ESP_LOGI(TAG, "Input channel disabled");
-            } else {
-                ESP_LOGE(TAG, "Failed to disable input: %s", esp_err_to_name(err));
-            }
-        } else {
-            input_enabled_ = false;
-        }
-    }
-}
-
-// ========== 核心修改：EnableOutput 真正操作硬件 ==========
-void AudioCodec::EnableOutput(bool enable) {
-    if (enable == output_enabled_) {
-        return;
-    }
-
-    esp_err_t err;
-    if (enable) {
-        if (tx_handle_ != nullptr) {
-            err = i2s_channel_enable(tx_handle_);
-            if (err == ESP_OK) {
-                output_enabled_ = true;
-                ESP_LOGI(TAG, "✅ Output channel enabled");
-            } else {
-                ESP_LOGE(TAG, "❌ Failed to enable output: %s (0x%x)", esp_err_to_name(err), err);
-            }
-        } else {
-            ESP_LOGE(TAG, "❌ tx_handle_ is NULL, cannot enable output");
-        }
-    } else {
-        if (tx_handle_ != nullptr) {
-            err = i2s_channel_disable(tx_handle_);
-            if (err == ESP_OK || err == ESP_ERR_INVALID_STATE) {
-                output_enabled_ = false;
-                ESP_LOGI(TAG, "Output channel disabled");
-            } else {
-                ESP_LOGE(TAG, "Failed to disable output: %s", esp_err_to_name(err));
-            }
-        } else {
-            output_enabled_ = false;
-        }
-    }
-}
-
-bool AudioCodec::SetOutputSampleRate(int sample_rate) {
-    // 特殊处理：如果传入 -1，表示重置到原始采样率
-    if (sample_rate == -1) {
-        if (original_output_sample_rate_ > 0) {
-            sample_rate = original_output_sample_rate_;
-            ESP_LOGI(TAG, "Resetting to original output sample rate: %d Hz", sample_rate);
-        } else {
-            ESP_LOGW(TAG, "Original sample rate not available, cannot reset");
-            return false;
-        }
-    }
-    
-    if (sample_rate <= 0 || sample_rate > 192000) {
-        ESP_LOGE(TAG, "Invalid sample rate: %d", sample_rate);
-        return false;
-    }
-    
-    if (output_sample_rate_ == sample_rate) {
-        ESP_LOGI(TAG, "Sample rate already set to %d Hz", sample_rate);
-        return true;
-    }
-    
-    if (tx_handle_ == nullptr) {
-        ESP_LOGW(TAG, "TX handle is null, only updating sample rate variable");
-        output_sample_rate_ = sample_rate;
-        return true;
-    }
-    
-    ESP_LOGI(TAG, "Changing output sample rate from %d to %d Hz", output_sample_rate_, sample_rate);
-    
-    // 先禁用通道（如果已启用）
-    bool was_enabled = output_enabled_;
-    if (was_enabled) {
-        esp_err_t disable_ret = i2s_channel_disable(tx_handle_);
-        if (disable_ret == ESP_OK || disable_ret == ESP_ERR_INVALID_STATE) {
-            ESP_LOGI(TAG, "I2S TX channel disabled for reconfiguration");
-        } else {
-            ESP_LOGW(TAG, "Failed to disable I2S TX channel: %s", esp_err_to_name(disable_ret));
-        }
-        output_enabled_ = false;
-    }
-    
-    // 重新配置 I2S 时钟
-    i2s_std_clk_config_t clk_cfg = {
-        .sample_rate_hz = (uint32_t)sample_rate,
-        .clk_src = I2S_CLK_SRC_DEFAULT,
-        .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-#ifdef I2S_HW_VERSION_2
-        .ext_clk_freq_hz = 0,
-#endif
-    };
-    
-    esp_err_t ret = i2s_channel_reconfig_std_clock(tx_handle_, &clk_cfg);
-    
-    // 如果之前是启用状态，重新启用
-    if (was_enabled) {
-        esp_err_t enable_ret = i2s_channel_enable(tx_handle_);
-        if (enable_ret == ESP_OK) {
-            output_enabled_ = true;
-            ESP_LOGI(TAG, "Re-enabled I2S TX channel");
-        } else {
-            ESP_LOGE(TAG, "Failed to re-enable I2S TX channel: %s", esp_err_to_name(enable_ret));
-        }
-    }
-    
-    if (ret == ESP_OK) {
-        output_sample_rate_ = sample_rate;
-        ESP_LOGI(TAG, "Successfully changed output sample rate to %d Hz", sample_rate);
-        return true;
-    } else {
-        ESP_LOGE(TAG, "Failed to change sample rate to %d Hz: %s", sample_rate, esp_err_to_name(ret));
-        return false;
-    }
-}
-
-void AudioCodec::Stop() {
-    ESP_LOGI(TAG, "Audio codec stop requested");
-
-    // 禁用输出通道
     if (tx_handle_ != nullptr) {
-        esp_err_t err = i2s_channel_disable(tx_handle_);
-        if (err == ESP_OK) {
-            ESP_LOGI(TAG, "I2S TX channel disabled");
-        } else if (err == ESP_ERR_INVALID_STATE) {
-            ESP_LOGI(TAG, "I2S TX channel already disabled");
+        ESP_ERROR_CHECK(i2s_channel_disable(tx_handle_));
+    }
+}
+
+NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_rate, gpio_num_t bclk, gpio_num_t ws, gpio_num_t dout, gpio_num_t din) {
+    duplex_ = true;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t chan_cfg = {
+        .id = I2S_NUM_0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
+        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
+    };
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+#ifdef   I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = bclk,
+            .ws = ws,
+            .dout = dout,
+            .din = din,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
+    ESP_LOGI(TAG, "Duplex channels created");
+}
+
+
+NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din) {
+    duplex_ = false;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t chan_cfg = {
+        .id = (i2s_port_t)0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
+        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
+    };
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, nullptr));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+#ifdef   I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = spk_bclk,
+            .ws = spk_ws,
+            .dout = spk_dout,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+
+    chan_cfg.id = (i2s_port_t)1;
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
+    std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
+    std_cfg.gpio_cfg.bclk = mic_sck;
+    std_cfg.gpio_cfg.ws = mic_ws;
+    std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    std_cfg.gpio_cfg.din = mic_din;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
+    ESP_LOGI(TAG, "Simplex channels created");
+}
+
+NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask, gpio_num_t mic_sck, gpio_num_t mic_ws, gpio_num_t mic_din, i2s_std_slot_mask_t mic_slot_mask){
+    duplex_ = false;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t chan_cfg = {
+        .id = (i2s_port_t)0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
+        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
+    };
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, nullptr));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = spk_slot_mask,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+#ifdef   I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = spk_bclk,
+            .ws = spk_ws,
+            .dout = spk_dout,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+
+    chan_cfg.id = (i2s_port_t)1;
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
+    std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
+    std_cfg.slot_cfg.slot_mask = mic_slot_mask;
+    std_cfg.gpio_cfg.bclk = mic_sck;
+    std_cfg.gpio_cfg.ws = mic_ws;
+    std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    std_cfg.gpio_cfg.din = mic_din;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
+    ESP_LOGI(TAG, "Simplex channels created");
+}
+
+NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate, gpio_num_t spk_bclk, gpio_num_t spk_ws, gpio_num_t spk_dout, gpio_num_t mic_sck, gpio_num_t mic_din) {
+    duplex_ = false;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG((i2s_port_t)1, I2S_ROLE_MASTER);
+    tx_chan_cfg.dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM;
+    tx_chan_cfg.dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM;
+    tx_chan_cfg.auto_clear_after_cb = true;
+    tx_chan_cfg.auto_clear_before_cb = false;
+    tx_chan_cfg.intr_priority = 0;
+    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_handle_, NULL));
+
+    i2s_std_config_t tx_std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = spk_bclk,
+            .ws = spk_ws,
+            .dout = spk_dout,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv   = false,
+            },
+        },
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &tx_std_cfg));
+#if SOC_I2S_SUPPORTS_PDM_RX
+    i2s_chan_config_t rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG((i2s_port_t)0, I2S_ROLE_MASTER);
+    ESP_ERROR_CHECK(i2s_new_channel(&rx_chan_cfg, NULL, &rx_handle_));
+    i2s_pdm_rx_config_t pdm_rx_cfg = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG((uint32_t)input_sample_rate_),
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .clk = mic_sck,
+            .din = mic_din,
+            .invert_flags = {
+                .clk_inv = false,
+            },
+        },
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(rx_handle_, &pdm_rx_cfg));
+#else
+    ESP_LOGE(TAG, "PDM is not supported");
+#endif
+    ESP_LOGI(TAG, "Simplex channels created");
+}
+
+int NoAudioCodec::Write(const int16_t* data, int samples) {
+    if (!output_enabled_ && tx_handle_ != nullptr) {
+        ESP_LOGI(TAG, "Output disabled, re-enabling via EnableOutput");
+        EnableOutput(true);
+    }
+
+    if (tx_handle_ == nullptr || !output_enabled_) {
+        ESP_LOGE(TAG, "Output channel not available");
+        return 0;
+    }
+
+    std::vector<int32_t> buffer(samples);
+    int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
+    for (int i = 0; i < samples; i++) {
+        int64_t temp = int64_t(data[i]) * volume_factor;
+        if (temp > INT32_MAX) {
+            buffer[i] = INT32_MAX;
+        } else if (temp < INT32_MIN) {
+            buffer[i] = INT32_MIN;
         } else {
-            ESP_LOGW(TAG, "Failed to disable I2S TX: %s", esp_err_to_name(err));
+            buffer[i] = static_cast<int32_t>(temp);
         }
     }
 
-    output_enabled_ = false;
-    ESP_LOGI(TAG, "Audio codec stopped (output disabled)");
+    size_t bytes_written;
+    esp_err_t err = i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Write failed: %s", esp_err_to_name(err));
+        return 0;
+    }
+    return bytes_written / sizeof(int32_t);
+}
+
+int NoAudioCodec::Read(int16_t* dest, int samples) {
+    size_t bytes_read;
+    std::vector<int32_t> bit32_buffer(samples);
+    if (i2s_channel_read(rx_handle_, bit32_buffer.data(), samples * sizeof(int32_t), &bytes_read, portMAX_DELAY) != ESP_OK) {
+        ESP_LOGE(TAG, "Read Failed!");
+        return 0;
+    }
+
+    samples = bytes_read / sizeof(int32_t);
+    for (int i = 0; i < samples; i++) {
+        int32_t value = bit32_buffer[i] >> 12;
+        dest[i] = (value > INT16_MAX) ? INT16_MAX : (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    }
+    return samples;
+}
+
+int NoAudioCodecSimplexPdm::Read(int16_t* dest, int samples) {
+    size_t bytes_read;
+    if (i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t), &bytes_read, portMAX_DELAY) != ESP_OK) {
+        ESP_LOGE(TAG, "Read Failed!");
+        return 0;
+    }
+    return bytes_read / sizeof(int16_t);
+}
+
+int NoAudioCodec::ReadNonBlocking(int16_t* dest, int samples) {
+    size_t bytes_read = 0;
+    std::vector<int32_t> bit32_buffer(samples);
+    esp_err_t err = i2s_channel_read(rx_handle_, bit32_buffer.data(), 
+                                     samples * sizeof(int32_t), &bytes_read, 0);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_TIMEOUT) {
+            return 0;
+        }
+        ESP_LOGE(TAG, "ReadNonBlocking failed: %s", esp_err_to_name(err));
+        return 0;
+    }
+    samples = bytes_read / sizeof(int32_t);
+    for (int i = 0; i < samples; i++) {
+        int32_t value = bit32_buffer[i] >> 12;
+        dest[i] = (value > INT16_MAX) ? INT16_MAX : 
+                  (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    }
+    return samples;
+}
+
+void NoAudioCodec::EnableInput() {
+    EnableInput(true);
+}
+
+void NoAudioCodec::DisableInput() {
+    EnableInput(false);
+}
+
+bool NoAudioCodec::IsInputEnabled() const {
+    return input_enabled_;
+}
+
+void NoAudioCodec::EnableInput(bool enable) {
+    if (enable) {
+        if (rx_handle_ != nullptr && !input_enabled_) {
+            ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
+            input_enabled_ = true;
+            ESP_LOGI(TAG, "Input enabled (with param)");
+        }
+    } else {
+        if (rx_handle_ != nullptr && input_enabled_) {
+            ESP_ERROR_CHECK(i2s_channel_disable(rx_handle_));
+            input_enabled_ = false;
+            ESP_LOGI(TAG, "Input disabled (with param)");
+        }
+    }
+}
+
+// 实现 EnableOutput
+void NoAudioCodec::EnableOutput(bool enable) {
+    // 调用基类实现
+    AudioCodec::EnableOutput(enable);
 }
