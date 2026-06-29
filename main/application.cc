@@ -564,11 +564,23 @@ void Application::Start()
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+            // 检查音频输出是否启用
+    auto codec = board.GetAudioCodec();
+    if (codec) {
+        ESP_LOGI(TAG, "🔊 After start, output_enabled = %d", codec->output_enabled());
+        if (!codec->output_enabled()) {
+            ESP_LOGW(TAG, "⚠️ Output is not enabled, trying to force enable...");
+            codec->EnableOutput(true);
+            // 再次尝试启用硬件
+            codec->Start();  // 重新执行启动流程
+        }
+    }
         ESP_LOGI(TAG, "Application Start completed, output_enabled = %d", codec->output_enabled());
     }
 
     // Print heap stats
     SystemInfo::PrintHeapStats();
+    
 }
 
 void Application::OnClockTimer()
