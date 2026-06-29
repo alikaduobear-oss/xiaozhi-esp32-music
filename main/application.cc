@@ -564,6 +564,7 @@ void Application::Start()
         display->SetChatMessage("system", "");
         // Play the success sound to indicate the device is ready
         audio_service_.PlaySound(Lang::Sounds::P3_SUCCESS);
+        ESP_LOGI(TAG, "Application Start completed, output_enabled = %d", codec->output_enabled());
     }
 
     // Print heap stats
