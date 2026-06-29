@@ -7,7 +7,7 @@
 
 #define TAG "NoAudioCodec"
 
-// 析构函数
+// ========== 析构函数 ==========
 NoAudioCodec::~NoAudioCodec() {
     if (rx_handle_ != nullptr) {
         ESP_ERROR_CHECK(i2s_channel_disable(rx_handle_));
@@ -17,13 +17,273 @@ NoAudioCodec::~NoAudioCodec() {
     }
 }
 
-// 构造函数（Duplex, Simplex, SimplexPdm）保持原样，此处省略...
+// ========== NoAudioCodecDuplex 构造函数 ==========
+NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_rate,
+                                       gpio_num_t bclk, gpio_num_t ws,
+                                       gpio_num_t dout, gpio_num_t din) {
+    duplex_ = true;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
 
-// ==================== Write 函数 ====================
+    i2s_chan_config_t chan_cfg = {
+        .id = I2S_NUM_0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
+        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
+    };
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, &rx_handle_));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+#ifdef I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = bclk,
+            .ws = ws,
+            .dout = dout,
+            .din = din,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
+    ESP_LOGI(TAG, "Duplex channels created");
+}
+
+// ========== NoAudioCodecSimplex 构造函数（第一个重载） ==========
+NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate,
+                                         gpio_num_t spk_bclk, gpio_num_t spk_ws,
+                                         gpio_num_t spk_dout, gpio_num_t mic_sck,
+                                         gpio_num_t mic_ws, gpio_num_t mic_din) {
+    duplex_ = false;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t chan_cfg = {
+        .id = (i2s_port_t)0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
+        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
+    };
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, nullptr));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = I2S_STD_SLOT_LEFT,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+#ifdef I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = spk_bclk,
+            .ws = spk_ws,
+            .dout = spk_dout,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+
+    chan_cfg.id = (i2s_port_t)1;
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
+    std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
+    std_cfg.gpio_cfg.bclk = mic_sck;
+    std_cfg.gpio_cfg.ws = mic_ws;
+    std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    std_cfg.gpio_cfg.din = mic_din;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
+    ESP_LOGI(TAG, "Simplex channels created");
+}
+
+// ========== NoAudioCodecSimplex 构造函数（第二个重载） ==========
+NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sample_rate,
+                                         gpio_num_t spk_bclk, gpio_num_t spk_ws,
+                                         gpio_num_t spk_dout, i2s_std_slot_mask_t spk_slot_mask,
+                                         gpio_num_t mic_sck, gpio_num_t mic_ws,
+                                         gpio_num_t mic_din, i2s_std_slot_mask_t mic_slot_mask) {
+    duplex_ = false;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t chan_cfg = {
+        .id = (i2s_port_t)0,
+        .role = I2S_ROLE_MASTER,
+        .dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM,
+        .dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM,
+        .auto_clear_after_cb = true,
+        .auto_clear_before_cb = false,
+        .intr_priority = 0,
+    };
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &tx_handle_, nullptr));
+
+    i2s_std_config_t std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = {
+            .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .slot_bit_width = I2S_SLOT_BIT_WIDTH_AUTO,
+            .slot_mode = I2S_SLOT_MODE_MONO,
+            .slot_mask = spk_slot_mask,
+            .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
+            .ws_pol = false,
+            .bit_shift = true,
+#ifdef I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
+        },
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = spk_bclk,
+            .ws = spk_ws,
+            .dout = spk_dout,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv = false
+            }
+        }
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &std_cfg));
+
+    chan_cfg.id = (i2s_port_t)1;
+    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, nullptr, &rx_handle_));
+    std_cfg.clk_cfg.sample_rate_hz = (uint32_t)input_sample_rate_;
+    std_cfg.slot_cfg.slot_mask = mic_slot_mask;
+    std_cfg.gpio_cfg.bclk = mic_sck;
+    std_cfg.gpio_cfg.ws = mic_ws;
+    std_cfg.gpio_cfg.dout = I2S_GPIO_UNUSED;
+    std_cfg.gpio_cfg.din = mic_din;
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(rx_handle_, &std_cfg));
+    ESP_LOGI(TAG, "Simplex channels created");
+}
+
+// ========== NoAudioCodecSimplexPdm 构造函数 ==========
+NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output_sample_rate,
+                                               gpio_num_t spk_bclk, gpio_num_t spk_ws,
+                                               gpio_num_t spk_dout, gpio_num_t mic_sck,
+                                               gpio_num_t mic_din) {
+    duplex_ = false;
+    input_sample_rate_ = input_sample_rate;
+    output_sample_rate_ = output_sample_rate;
+
+    i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG((i2s_port_t)1, I2S_ROLE_MASTER);
+    tx_chan_cfg.dma_desc_num = AUDIO_CODEC_DMA_DESC_NUM;
+    tx_chan_cfg.dma_frame_num = AUDIO_CODEC_DMA_FRAME_NUM;
+    tx_chan_cfg.auto_clear_after_cb = true;
+    tx_chan_cfg.auto_clear_before_cb = false;
+    tx_chan_cfg.intr_priority = 0;
+    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &tx_handle_, NULL));
+
+    i2s_std_config_t tx_std_cfg = {
+        .clk_cfg = {
+            .sample_rate_hz = (uint32_t)output_sample_rate_,
+            .clk_src = I2S_CLK_SRC_DEFAULT,
+            .mclk_multiple = I2S_MCLK_MULTIPLE_256,
+#ifdef I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
+        },
+        .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .mclk = I2S_GPIO_UNUSED,
+            .bclk = spk_bclk,
+            .ws = spk_ws,
+            .dout = spk_dout,
+            .din = I2S_GPIO_UNUSED,
+            .invert_flags = {
+                .mclk_inv = false,
+                .bclk_inv = false,
+                .ws_inv   = false,
+            },
+        },
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(tx_handle_, &tx_std_cfg));
+#if SOC_I2S_SUPPORTS_PDM_RX
+    i2s_chan_config_t rx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG((i2s_port_t)0, I2S_ROLE_MASTER);
+    ESP_ERROR_CHECK(i2s_new_channel(&rx_chan_cfg, NULL, &rx_handle_));
+    i2s_pdm_rx_config_t pdm_rx_cfg = {
+        .clk_cfg = I2S_PDM_RX_CLK_DEFAULT_CONFIG((uint32_t)input_sample_rate_),
+        .slot_cfg = I2S_PDM_RX_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
+        .gpio_cfg = {
+            .clk = mic_sck,
+            .din = mic_din,
+            .invert_flags = {
+                .clk_inv = false,
+            },
+        },
+    };
+    ESP_ERROR_CHECK(i2s_channel_init_pdm_rx_mode(rx_handle_, &pdm_rx_cfg));
+#else
+    ESP_LOGE(TAG, "PDM is not supported");
+#endif
+    ESP_LOGI(TAG, "Simplex channels created");
+}
+
+// ========== Write 函数 ==========
 int NoAudioCodec::Write(const int16_t* data, int samples) {
     if (!output_enabled_ && tx_handle_ != nullptr) {
         ESP_LOGI(TAG, "Output disabled, re-enabling via EnableOutput");
-        EnableOutput(true);   // 调用本类的 EnableOutput
+        EnableOutput(true);
     }
 
     if (tx_handle_ == nullptr || !output_enabled_) {
@@ -51,9 +311,77 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
     return bytes_written / sizeof(int32_t);
 }
 
-// Read, ReadNonBlocking 等保持不变...
+// ========== Read 函数（纯虚函数实现，必须存在） ==========
+int NoAudioCodec::Read(int16_t* dest, int samples) {
+    size_t bytes_read;
 
-// ==================== EnableInput(bool) ====================
+    std::vector<int32_t> bit32_buffer(samples);
+    if (i2s_channel_read(rx_handle_, bit32_buffer.data(),
+                         samples * sizeof(int32_t), &bytes_read, portMAX_DELAY) != ESP_OK) {
+        ESP_LOGE(TAG, "Read Failed!");
+        return 0;
+    }
+
+    samples = bytes_read / sizeof(int32_t);
+    for (int i = 0; i < samples; i++) {
+        int32_t value = bit32_buffer[i] >> 12;
+        dest[i] = (value > INT16_MAX) ? INT16_MAX :
+                  (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    }
+    return samples;
+}
+
+// ========== NoAudioCodecSimplexPdm::Read（覆盖） ==========
+int NoAudioCodecSimplexPdm::Read(int16_t* dest, int samples) {
+    size_t bytes_read;
+
+    if (i2s_channel_read(rx_handle_, dest, samples * sizeof(int16_t),
+                         &bytes_read, portMAX_DELAY) != ESP_OK) {
+        ESP_LOGE(TAG, "Read Failed!");
+        return 0;
+    }
+
+    return bytes_read / sizeof(int16_t);
+}
+
+// ========== 非阻塞读取 ==========
+int NoAudioCodec::ReadNonBlocking(int16_t* dest, int samples) {
+    size_t bytes_read = 0;
+    std::vector<int32_t> bit32_buffer(samples);
+
+    esp_err_t err = i2s_channel_read(rx_handle_, bit32_buffer.data(),
+                                     samples * sizeof(int32_t), &bytes_read, 0);
+    if (err != ESP_OK) {
+        if (err == ESP_ERR_TIMEOUT) {
+            return 0;
+        }
+        ESP_LOGE(TAG, "ReadNonBlocking failed: %s", esp_err_to_name(err));
+        return 0;
+    }
+
+    samples = bytes_read / sizeof(int32_t);
+    for (int i = 0; i < samples; i++) {
+        int32_t value = bit32_buffer[i] >> 12;
+        dest[i] = (value > INT16_MAX) ? INT16_MAX :
+                  (value < -INT16_MAX) ? -INT16_MAX : (int16_t)value;
+    }
+    return samples;
+}
+
+// ========== 无参 EnableInput/DisableInput ==========
+void NoAudioCodec::EnableInput() {
+    EnableInput(true);
+}
+
+void NoAudioCodec::DisableInput() {
+    EnableInput(false);
+}
+
+bool NoAudioCodec::IsInputEnabled() const {
+    return input_enabled_;
+}
+
+// ========== 带参 EnableInput ==========
 void NoAudioCodec::EnableInput(bool enable) {
     if (enable) {
         if (rx_handle_ != nullptr && !input_enabled_) {
@@ -70,10 +398,7 @@ void NoAudioCodec::EnableInput(bool enable) {
     }
 }
 
-// ==================== EnableOutput(bool) ====================
+// ========== 带参 EnableOutput ==========
 void NoAudioCodec::EnableOutput(bool enable) {
-    // 调用基类实现，基类会操作硬件并更新标志
     AudioCodec::EnableOutput(enable);
 }
-
-// 无参 EnableInput/DisableInput/IsInputEnabled 保留...
