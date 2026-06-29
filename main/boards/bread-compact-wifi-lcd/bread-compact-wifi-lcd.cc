@@ -133,30 +133,21 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
-        static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
-            AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
-        
+    static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+        AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
+        AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
+    
+    static bool initialized = false;
+    if (!initialized) {
         audio_codec.EnableInput(true);
         ESP_LOGI(TAG, "Audio codec initialized with input always enabled for wake word detection");
+        initialized = true;
+    }
 #else
-        static NoAudioCodecDuplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
+    static NoAudioCodecDuplex audio_codec(...); // 如果有其他配置
 #endif
-        return &audio_codec;
-    }
-
-    virtual Display* GetDisplay() override {
-        return display_;
-    }
-
-    virtual Backlight* GetBacklight() override {
-        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
-            static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
-            return &backlight;
-        }
-        return nullptr;
-    }
+    return &audio_codec;
+}
 
     // ========== 修改点：唤醒词检测回调（覆盖基类虚函数） ==========
     virtual void OnWakeWordDetected() override {
