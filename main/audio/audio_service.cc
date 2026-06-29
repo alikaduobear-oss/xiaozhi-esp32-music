@@ -1,6 +1,6 @@
 #include "audio_service.h"
 #include <esp_log.h>
-
+#include "board.h"  // 新增
 #if CONFIG_USE_AUDIO_PROCESSOR
 #include "processors/afe_audio_processor.h"
 #else
