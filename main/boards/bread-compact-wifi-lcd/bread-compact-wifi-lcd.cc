@@ -87,16 +87,13 @@ private:
                                     });
     }
 
-    // ========== 修改点：在 InitializeButtons 的 OnClick 中插入 Stop() ==========
     void InitializeButtons() {
         boot_button_.OnClick([this]() {
-            // ----- 新增：立即停止音频播放 -----
             auto audio_codec = GetAudioCodec();
             if (audio_codec != nullptr) {
                 audio_codec->Stop();
                 ESP_LOGI(TAG, "Button click: audio stopped for interrupt");
             }
-            // ----- 原有逻辑继续 -----
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateStarting && !WifiStation::GetInstance().IsConnected()) {
                 ResetWifiConfiguration();
@@ -104,7 +101,6 @@ private:
             app.ToggleChatState();
         });
 
-        // 长按打断（保留原有）
         boot_button_.OnLongPress([this]() {
             auto& app = Application::GetInstance();
             if (app.GetDeviceState() == kDeviceStateSpeaking) {
@@ -113,25 +109,9 @@ private:
             }
         });
     }
-    // ========== 修改结束 ==========
 
     void InitializeTools() {
         static LampController lamp(LAMP_GPIO);
-    }
-
-    void OnWakeWordDetected() {
-        wake_word_detected_ = true;
-        auto& app = Application::GetInstance();
-        
-        if (app.GetDeviceState() == kDeviceStateSpeaking) {
-            ESP_LOGI(TAG, "Wake word detected during speaking, triggering interrupt");
-            app.ToggleChatState();
-        } else if (app.GetDeviceState() == kDeviceStateIdle) {
-            ESP_LOGI(TAG, "Wake word detected in idle, starting conversation");
-            app.ToggleChatState();
-        }
-        
-        wake_word_detected_ = false;
     }
 
 public:
@@ -177,6 +157,31 @@ public:
         }
         return nullptr;
     }
+
+    // ========== 修改点：唤醒词检测回调（覆盖基类虚函数） ==========
+    virtual void OnWakeWordDetected() override {
+        wake_word_detected_ = true;
+        auto& app = Application::GetInstance();
+        auto audio_codec = GetAudioCodec();
+        
+        // 立即停止当前播放
+        if (audio_codec != nullptr) {
+            audio_codec->Stop();
+            ESP_LOGI(TAG, "Wake word detected: audio stopped");
+        }
+        
+        // 切换应用状态
+        if (app.GetDeviceState() == kDeviceStateSpeaking) {
+            ESP_LOGI(TAG, "Wake word detected during speaking, triggering interrupt");
+            app.ToggleChatState();
+        } else if (app.GetDeviceState() == kDeviceStateIdle) {
+            ESP_LOGI(TAG, "Wake word detected in idle, starting conversation");
+            app.ToggleChatState();
+        }
+        
+        wake_word_detected_ = false;
+    }
+    // ========== 修改结束 ==========
 
     bool IsWakeWordDetected() const {
         return wake_word_detected_;
