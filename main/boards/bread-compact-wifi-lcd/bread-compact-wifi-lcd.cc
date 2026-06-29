@@ -122,7 +122,10 @@ public:
         InitializeButtons();
         InitializeTools();
         if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
-            GetBacklight()->RestoreBrightness();
+            auto backlight = GetBacklight();
+            if (backlight) {
+                backlight->RestoreBrightness();
+            }
         }
     }
 
@@ -133,35 +136,46 @@ public:
 
     virtual AudioCodec* GetAudioCodec() override {
 #ifdef AUDIO_I2S_METHOD_SIMPLEX
-    static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
-        AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
-        AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
-    
-    static bool initialized = false;
-    if (!initialized) {
-        audio_codec.EnableInput(true);
-        ESP_LOGI(TAG, "Audio codec initialized with input always enabled for wake word detection");
-        initialized = true;
-    }
+        static NoAudioCodecSimplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_SPK_GPIO_BCLK, AUDIO_I2S_SPK_GPIO_LRCK, AUDIO_I2S_SPK_GPIO_DOUT,
+            AUDIO_I2S_MIC_GPIO_SCK, AUDIO_I2S_MIC_GPIO_WS, AUDIO_I2S_MIC_GPIO_DIN);
+        
+        static bool initialized = false;
+        if (!initialized) {
+            audio_codec.EnableInput(true);
+            ESP_LOGI(TAG, "Audio codec initialized with input always enabled for wake word detection");
+            initialized = true;
+        }
 #else
-    static NoAudioCodecDuplex audio_codec(...); // 如果有其他配置
+        static NoAudioCodecDuplex audio_codec(AUDIO_INPUT_SAMPLE_RATE, AUDIO_OUTPUT_SAMPLE_RATE,
+            AUDIO_I2S_GPIO_BCLK, AUDIO_I2S_GPIO_WS, AUDIO_I2S_GPIO_DOUT, AUDIO_I2S_GPIO_DIN);
 #endif
-    return &audio_codec;
-}
+        return &audio_codec;
+    }
 
-    // ========== 修改点：唤醒词检测回调（覆盖基类虚函数） ==========
+    virtual Display* GetDisplay() override {
+        return display_;
+    }
+
+    virtual Backlight* GetBacklight() override {
+        if (DISPLAY_BACKLIGHT_PIN != GPIO_NUM_NC) {
+            static PwmBacklight backlight(DISPLAY_BACKLIGHT_PIN, DISPLAY_BACKLIGHT_OUTPUT_INVERT);
+            return &backlight;
+        }
+        return nullptr;
+    }
+
+    // 唤醒词检测回调（覆盖基类虚函数）
     virtual void OnWakeWordDetected() override {
         wake_word_detected_ = true;
         auto& app = Application::GetInstance();
         auto audio_codec = GetAudioCodec();
         
-        // 立即停止当前播放
         if (audio_codec != nullptr) {
             audio_codec->Stop();
             ESP_LOGI(TAG, "Wake word detected: audio stopped");
         }
         
-        // 切换应用状态
         if (app.GetDeviceState() == kDeviceStateSpeaking) {
             ESP_LOGI(TAG, "Wake word detected during speaking, triggering interrupt");
             app.ToggleChatState();
@@ -172,7 +186,6 @@ public:
         
         wake_word_detected_ = false;
     }
-    // ========== 修改结束 ==========
 
     bool IsWakeWordDetected() const {
         return wake_word_detected_;
