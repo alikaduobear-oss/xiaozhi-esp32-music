@@ -40,13 +40,15 @@ void AudioCodec::Start() {
         ESP_LOGI(TAG, "Saved original output sample rate: %d Hz", original_output_sample_rate_);
     }
 
-    if (tx_handle_ != nullptr) {
+    // ========== 修改开始 ==========
+    // 只有在尚未启用时才启用通道，避免重复启用报错
+    if (tx_handle_ != nullptr && !output_enabled_) {
         ESP_ERROR_CHECK(i2s_channel_enable(tx_handle_));
     }
-
-    if (rx_handle_ != nullptr) {
+    if (rx_handle_ != nullptr && !input_enabled_) {
         ESP_ERROR_CHECK(i2s_channel_enable(rx_handle_));
     }
+    // ========== 修改结束 ==========
 
     EnableInput(true);
     EnableOutput(true);
