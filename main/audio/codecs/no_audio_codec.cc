@@ -36,10 +36,9 @@ NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-			#ifdef   I2S_HW_VERSION_2
-				.ext_clk_freq_hz = 0,
-			#endif
-
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
         },
         .slot_cfg = {
             .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
@@ -49,12 +48,11 @@ NoAudioCodecDuplex::NoAudioCodecDuplex(int input_sample_rate, int output_sample_
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-            #ifdef   I2S_HW_VERSION_2
-                .left_align = true,
-                .big_endian = false,
-                .bit_order_lsb = false
-            #endif
-
+#ifdef   I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
         },
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -97,10 +95,9 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-			#ifdef   I2S_HW_VERSION_2
-				.ext_clk_freq_hz = 0,
-			#endif
-
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
         },
         .slot_cfg = {
             .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
@@ -110,12 +107,11 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-            #ifdef   I2S_HW_VERSION_2
-                .left_align = true,
-                .big_endian = false,
-                .bit_order_lsb = false
-            #endif
-
+#ifdef   I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
         },
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -166,10 +162,9 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-			#ifdef   I2S_HW_VERSION_2
-				.ext_clk_freq_hz = 0,
-			#endif
-
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
         },
         .slot_cfg = {
             .data_bit_width = I2S_DATA_BIT_WIDTH_32BIT,
@@ -179,12 +174,11 @@ NoAudioCodecSimplex::NoAudioCodecSimplex(int input_sample_rate, int output_sampl
             .ws_width = I2S_DATA_BIT_WIDTH_32BIT,
             .ws_pol = false,
             .bit_shift = true,
-            #ifdef   I2S_HW_VERSION_2
-                .left_align = true,
-                .big_endian = false,
-                .bit_order_lsb = false
-            #endif
-
+#ifdef   I2S_HW_VERSION_2
+            .left_align = true,
+            .big_endian = false,
+            .bit_order_lsb = false
+#endif
         },
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -234,10 +228,9 @@ NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output
             .sample_rate_hz = (uint32_t)output_sample_rate_,
             .clk_src = I2S_CLK_SRC_DEFAULT,
             .mclk_multiple = I2S_MCLK_MULTIPLE_256,
-			#ifdef   I2S_HW_VERSION_2
-				.ext_clk_freq_hz = 0,
-			#endif
-
+#ifdef   I2S_HW_VERSION_2
+            .ext_clk_freq_hz = 0,
+#endif
         },
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_DATA_BIT_WIDTH_32BIT, I2S_SLOT_MODE_MONO),
         .gpio_cfg = {
@@ -278,14 +271,32 @@ NoAudioCodecSimplexPdm::NoAudioCodecSimplexPdm(int input_sample_rate, int output
     ESP_LOGI(TAG, "Simplex channels created");
 }
 
+// ==================== 修改点：Write 函数添加自动恢复 ====================
 int NoAudioCodec::Write(const int16_t* data, int samples) {
+    // 自动恢复输出通道（如果被 Stop 禁用）
+    if (tx_handle_ != nullptr && !output_enabled_) {
+        esp_err_t err = i2s_channel_enable(tx_handle_);
+        if (err == ESP_OK) {
+            output_enabled_ = true;
+            ESP_LOGI(TAG, "Auto-enabled output channel on write");
+        } else {
+            ESP_LOGE(TAG, "Failed to auto-enable output channel: %s", esp_err_to_name(err));
+            return 0;
+        }
+    }
+
+    if (tx_handle_ == nullptr || !output_enabled_) {
+        ESP_LOGE(TAG, "Output channel not available");
+        return 0;
+    }
+
     std::vector<int32_t> buffer(samples);
 
     // output_volume_: 0-100
     // volume_factor_: 0-65536
     int32_t volume_factor = pow(double(output_volume_) / 100.0, 2) * 65536;
     for (int i = 0; i < samples; i++) {
-        int64_t temp = int64_t(data[i]) * volume_factor; // 使用 int64_t 进行乘法运算
+        int64_t temp = int64_t(data[i]) * volume_factor;
         if (temp > INT32_MAX) {
             buffer[i] = INT32_MAX;
         } else if (temp < INT32_MIN) {
@@ -296,9 +307,14 @@ int NoAudioCodec::Write(const int16_t* data, int samples) {
     }
 
     size_t bytes_written;
-    ESP_ERROR_CHECK(i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY));
+    esp_err_t err = i2s_channel_write(tx_handle_, buffer.data(), samples * sizeof(int32_t), &bytes_written, portMAX_DELAY);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Write failed: %s", esp_err_to_name(err));
+        return 0;
+    }
     return bytes_written / sizeof(int32_t);
 }
+// ==================== 修改结束 ====================
 
 int NoAudioCodec::Read(int16_t* dest, int samples) {
     size_t bytes_read;
