@@ -887,6 +887,7 @@ void Application::AddAudioData(AudioStreamPacket &&packet)
                     return;
                 }
 
+                // 如果数据采样率高于输出采样率，尝试切换输出采样率
                 if (packet.sample_rate > codec->output_sample_rate())
                 {
                     ESP_LOGI(TAG, "Music Player: Adjust the sampling rate from %d Hz to %d Hz",
@@ -901,65 +902,45 @@ void Application::AddAudioData(AudioStreamPacket &&packet)
                         ESP_LOGW(TAG, "Unable to switch sampling rate, continue using current sampling rate: %d Hz", codec->output_sample_rate());
                     }
                 }
-                else
+                // 如果数据采样率低于输出采样率，执行上采样
+                else if (packet.sample_rate < codec->output_sample_rate())
                 {
-                    if (packet.sample_rate > codec->output_sample_rate())
-                    {
-                        float downsample_ratio = static_cast<float>(packet.sample_rate) / codec->output_sample_rate();
-                        size_t expected_size = static_cast<size_t>(pcm_data.size() / downsample_ratio + 0.5f);
-                        std::vector<int16_t> resampled(expected_size);
-                        size_t resampled_index = 0;
+                    float upsample_ratio = codec->output_sample_rate() / static_cast<float>(packet.sample_rate);
+                    size_t expected_size = static_cast<size_t>(pcm_data.size() * upsample_ratio + 0.5f);
+                    std::vector<int16_t> resampled;
+                    resampled.reserve(expected_size);
 
-                        for (size_t i = 0; i < pcm_data.size(); ++i)
+                    for (size_t i = 0; i < pcm_data.size(); ++i)
+                    {
+                        resampled.push_back(pcm_data[i]);
+
+                        int interpolation_count = static_cast<int>(upsample_ratio) - 1;
+                        if (interpolation_count > 0 && i + 1 < pcm_data.size())
                         {
-                            if (i % static_cast<size_t>(downsample_ratio) == 0)
+                            int16_t current = pcm_data[i];
+                            int16_t next = pcm_data[i + 1];
+                            for (int j = 1; j <= interpolation_count; ++j)
                             {
-                                resampled[resampled_index++] = pcm_data[i];
+                                float t = static_cast<float>(j) / (interpolation_count + 1);
+                                int16_t interpolated = static_cast<int16_t>(current + (next - current) * t);
+                                resampled.push_back(interpolated);
                             }
                         }
-
-                        pcm_data = std::move(resampled);
-                        ESP_LOGI(TAG, "Downsampled %d -> %d samples (ratio: %.2f)",
-                                 pcm_data.size(), resampled.size(), downsample_ratio);
-                    }
-                    else if (packet.sample_rate < codec->output_sample_rate())
-                    {
-                        float upsample_ratio = codec->output_sample_rate() / static_cast<float>(packet.sample_rate);
-                        size_t expected_size = static_cast<size_t>(pcm_data.size() * upsample_ratio + 0.5f);
-                        std::vector<int16_t> resampled;
-                        resampled.reserve(expected_size);
-
-                        for (size_t i = 0; i < pcm_data.size(); ++i)
+                        else if (interpolation_count > 0)
                         {
-                            resampled.push_back(pcm_data[i]);
-
-                            int interpolation_count = static_cast<int>(upsample_ratio) - 1;
-                            if (interpolation_count > 0 && i + 1 < pcm_data.size())
+                            for (int j = 1; j <= interpolation_count; ++j)
                             {
-                                int16_t current = pcm_data[i];
-                                int16_t next = pcm_data[i + 1];
-                                for (int j = 1; j <= interpolation_count; ++j)
-                                {
-                                    float t = static_cast<float>(j) / (interpolation_count + 1);
-                                    int16_t interpolated = static_cast<int16_t>(current + (next - current) * t);
-                                    resampled.push_back(interpolated);
-                                }
-                            }
-                            else if (interpolation_count > 0)
-                            {
-                                for (int j = 1; j <= interpolation_count; ++j)
-                                {
-                                    resampled.push_back(pcm_data[i]);
-                                }
+                                resampled.push_back(pcm_data[i]);
                             }
                         }
-
-                        ESP_LOGI(TAG, "Upsampled %d -> %d samples (ratio: %.2f)",
-                                 pcm_data.size(), resampled.size(), upsample_ratio);
                     }
+
+                    ESP_LOGI(TAG, "Upsampled %d -> %d samples (ratio: %.2f)",
+                             pcm_data.size(), resampled.size(), upsample_ratio);
+                    
+                    pcm_data = std::move(resampled);
                 }
-
-                pcm_data = std::move(resampled);
+                // 注意：如果 packet.sample_rate == codec->output_sample_rate()，不需要重采样
             }
 
             if (!codec->output_enabled())
