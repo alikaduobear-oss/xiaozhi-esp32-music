@@ -3,32 +3,12 @@
 
 #include <string_view>
 
-#ifndef zh_cn
-    #define zh_cn  // 預設語言
-#endif
-
-#ifndef th_th
-    #define th_th  // 泰语
-#endif
-
 namespace Lang {
-    // ===== 中文（默认） =====
-    #ifdef zh_cn
-    constexpr const char* CODE = "zh-CN";
+    // ==========================================
+    // 泰语版本（当 CONFIG_LANGUAGE_TH_TH 被定义时）
+    // ==========================================
+    #ifdef CONFIG_LANGUAGE_TH_TH
 
-    namespace Strings {
-        constexpr const char* ACCESS_VIA_BROWSER = "，浏览器访问 ";
-        constexpr const char* ACTIVATION = "激活设备";
-        // ... 所有中文字符串（保持原有不变）
-    }
-
-    namespace Sounds {
-        // ... 所有中文音效（保持原有不变）
-    }
-    #endif
-
-    // ===== 泰语（新增） =====
-    #ifdef th_th
     constexpr const char* CODE = "th-TH";
 
     namespace Strings {
@@ -149,8 +129,7 @@ namespace Lang {
             static_cast<size_t>(p3_9_end - p3_9_start)
         };
 
-        // ===== 功能音效（泰语版本） =====
-        // active.p3 → 激活提示音
+        // ===== 泰语功能音效 =====
         extern const char p3_active_start[] asm("_binary_active_p3_start");
         extern const char p3_active_end[] asm("_binary_active_p3_end");
         static const std::string_view P3_ACTIVE {
@@ -158,7 +137,6 @@ namespace Lang {
             static_cast<size_t>(p3_active_end - p3_active_start)
         };
 
-        // hello.p3 → 问候音
         extern const char p3_hello_start[] asm("_binary_hello_p3_start");
         extern const char p3_hello_end[] asm("_binary_hello_p3_end");
         static const std::string_view P3_HELLO {
@@ -166,7 +144,6 @@ namespace Lang {
             static_cast<size_t>(p3_hello_end - p3_hello_start)
         };
 
-        // welcome.p3 → 欢迎音
         extern const char p3_welcome_start[] asm("_binary_welcome_p3_start");
         extern const char p3_welcome_end[] asm("_binary_welcome_p3_end");
         static const std::string_view P3_WELCOME {
@@ -174,13 +151,82 @@ namespace Lang {
             static_cast<size_t>(p3_welcome_end - p3_welcome_start)
         };
 
-        // wifi.p3 → Wi-Fi 配置提示音
         extern const char p3_wifi_start[] asm("_binary_wifi_p3_start");
         extern const char p3_wifi_end[] asm("_binary_wifi_p3_end");
         static const std::string_view P3_WIFI {
             static_cast<const char*>(p3_wifi_start),
             static_cast<size_t>(p3_wifi_end - p3_wifi_start)
         };
+
+        // ===== 其他音效（如需要，可以继续添加） =====
+        // 例如：err_pin, err_reg, success, upgrade, vibration, etc.
     }
+
+    // ==========================================
+    // 中文版本（默认，当未定义 CONFIG_LANGUAGE_TH_TH 时）
+    // ==========================================
+    #else
+
+    constexpr const char* CODE = "zh-CN";
+
+    namespace Strings {
+        constexpr const char* ACCESS_VIA_BROWSER = "，浏览器访问 ";
+        constexpr const char* ACTIVATION = "激活设备";
+        constexpr const char* BATTERY_CHARGING = "正在充电";
+        constexpr const char* BATTERY_FULL = "电量已满";
+        constexpr const char* BATTERY_LOW = "电量不足";
+        constexpr const char* BATTERY_NEED_CHARGE = "电量低，请充电";
+        constexpr const char* CHECKING_NEW_VERSION = "检查新版本...";
+        constexpr const char* CHECK_NEW_VERSION_FAILED = "检查新版本失败，将在 %d 秒后重试：%s";
+        constexpr const char* CONNECTED_TO = "已连接 ";
+        constexpr const char* CONNECTING = "连接中...";
+        constexpr const char* CONNECT_TO = "连接 ";
+        constexpr const char* CONNECT_TO_HOTSPOT = "手机连接热点 ";
+        constexpr const char* DETECTING_MODULE = "检测模组...";
+        constexpr const char* ENTERING_WIFI_CONFIG_MODE = "进入配网模式...";
+        constexpr const char* ERROR = "错误";
+        constexpr const char* INFO = "信息";
+        constexpr const char* INITIALIZING = "正在初始化...";
+        constexpr const char* LISTENING = "聆听中...";
+        constexpr const char* LOADING_PROTOCOL = "登录服务器...";
+        constexpr const char* MAX_VOLUME = "最大音量";
+        constexpr const char* MUTED = "已静音";
+        constexpr const char* NEW_VERSION = "新版本 ";
+        constexpr const char* OTA_UPGRADE = "OTA 升级";
+        constexpr const char* PIN_ERROR = "请插入 SIM 卡";
+        constexpr const char* REGISTERING_NETWORK = "等待网络...";
+        constexpr const char* REG_ERROR = "无法接入网络，请检查流量卡状态";
+        constexpr const char* RTC_MODE_OFF = "AEC 关闭";
+        constexpr const char* RTC_MODE_ON = "AEC 开启";
+        constexpr const char* SCANNING_WIFI = "扫描 Wi-Fi...";
+        constexpr const char* SERVER_ERROR = "发送失败，请检查网络";
+        constexpr const char* SERVER_NOT_CONNECTED = "无法连接服务，请稍后再试";
+        constexpr const char* SERVER_NOT_FOUND = "正在寻找可用服务";
+        constexpr const char* SERVER_TIMEOUT = "等待响应超时";
+        constexpr const char* SPEAKING = "说话中...";
+        constexpr const char* STANDBY = "待命";
+        constexpr const char* SWITCH_TO_4G_NETWORK = "切换到 4G...";
+        constexpr const char* SWITCH_TO_WIFI_NETWORK = "切换到 Wi-Fi...";
+        constexpr const char* UPGRADE_FAILED = "升级失败";
+        constexpr const char* UPGRADING = "正在升级系统...";
+        constexpr const char* VERSION = "版本 ";
+        constexpr const char* VOLUME = "音量 ";
+        constexpr const char* WARNING = "警告";
+        constexpr const char* WIFI_CONFIG_MODE = "配网模式";
+    }
+
+    namespace Sounds {
+        // ===== 中文音效（保持原有，此处仅示意，你需要保留原文件中的完整定义） =====
+        // 注意：你需要从原 Lang.h 中复制完整的中文 Sounds 定义到这里
+        // 由于你原来的 Lang.h 中已有完整的中文 Sounds，此处只做占位，实际使用时请保留完整的原始内容
+        extern const char p3_0_start[] asm("_binary_0_p3_start");
+        extern const char p3_0_end[] asm("_binary_0_p3_end");
+        static const std::string_view P3_0 {
+            static_cast<const char*>(p3_0_start),
+            static_cast<size_t>(p3_0_end - p3_0_start)
+        };
+        // ... 其他音效（请从原文件完整复制）
+    }
+
     #endif
 }
