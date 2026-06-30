@@ -134,3 +134,12 @@ CONFIG_USE_AUDIO_PROCESSOR=y
 # 禁用设备端 AEC（使用服务端 AEC 或关闭）
 # CONFIG_USE_DEVICE_AEC=n
 # CONFIG_USE_SERVER_AEC=y
+
+# ============================================
+# 语言配置（二选一，取消注释需要的）
+# ============================================
+# CONFIG_LANGUAGE_ZH_CN=y      # 中文（默认）
+# CONFIG_LANGUAGE_ZH_TW=y      # 繁体中文
+# CONFIG_LANGUAGE_EN_US=y      # 英文
+# CONFIG_LANGUAGE_JA_JP=y      # 日文
+CONFIG_LANGUAGE_TH_TH=y        # 泰语（当前启用）
