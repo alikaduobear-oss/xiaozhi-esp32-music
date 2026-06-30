@@ -21,6 +21,8 @@ choice
         bool "English"
     config LANGUAGE_JA_JP
         bool "Japanese"
+    config LANGUAGE_TH_TH
+        bool "Thai (ภาษาไทย)"
 endchoice
 
 choice BOARD_TYPE
