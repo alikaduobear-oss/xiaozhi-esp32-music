@@ -1,0 +1,11 @@
+{
+    "languages": {
+        "zh-CN": {
+            "name": "Chinese"
+        },
+        "th-TH": {
+            "name": "Thai"
+        }
+    },
+    "default": "th-TH"
+}
