@@ -9,7 +9,7 @@ config OTA_URL
 
 choice
     prompt "Default Language"
-    default LANGUAGE_ZH_CN
+    default LANGUAGE_TH_TH
     help
         Select device display language
 
