@@ -1,1 +1,1 @@
-LV_FONT_DECLARE(noto_sans_thai_24);
+LV_FONT_DECLARE(noto_thai_24);
