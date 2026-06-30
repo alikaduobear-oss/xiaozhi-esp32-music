@@ -90,7 +90,8 @@ void Application::CheckNewVersion(Ota &ota)
                 return;
             }
 
-            char buffer[128];
+            // 增大 buffer 大小以容纳所有语言的字符串（特别是泰语）
+            char buffer[512];
             snprintf(buffer, sizeof(buffer), Lang::Strings::CHECK_NEW_VERSION_FAILED, retry_delay, ota.GetCheckVersionUrl().c_str());
             Alert(Lang::Strings::ERROR, buffer, "sad", Lang::Sounds::P3_WELCOME);
 
